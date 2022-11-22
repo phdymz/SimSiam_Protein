@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from pytorch3d.ops.knn import knn_points
+from scipy.spatial.transform import Rotation
 
 
 
@@ -91,8 +92,53 @@ class Protein(Dataset):
                 label = label[idx]
                 curvature = curvature[idx]
 
+            xyz = torch.from_numpy(xyz)
+            normal = torch.from_numpy(normal)
+            label = torch.from_numpy(label)
+            curvature = torch.from_numpy(curvature)
+            atom = torch.from_numpy(atom)
+            atom_type = torch.from_numpy(atom_type)
+
+
         elif self.sample_type == 'knn':
-            pass
+            if len(xyz) <= self.sample_num:
+                idx = np.random.choice(len(xyz), self.sample_num, replace=True)
+                xyz = xyz[idx]
+                normal = normal[idx]
+                label = label[idx]
+                curvature = curvature[idx]
+
+                xyz = torch.from_numpy(xyz)
+                normal = torch.from_numpy(normal)
+                label = torch.from_numpy(label)
+                curvature = torch.from_numpy(curvature)
+                atom = torch.from_numpy(atom)
+                atom_type = torch.from_numpy(atom_type)
+            else:
+                idx_kpts = np.random.choice(len(xyz), 1)
+                kpts = torch.from_numpy(xyz[idx_kpts])
+                xyz = torch.from_numpy(xyz)
+                normal = torch.from_numpy(normal)
+                label = torch.from_numpy(label)
+                curvature = torch.from_numpy(curvature)
+                atom = torch.from_numpy(atom)
+                atom_type = torch.from_numpy(atom_type)
+
+                _, idx, _ = knn_points(kpts.unsqueeze(0), xyz.unsqueeze(0), K=self.sample_num)
+                idx = idx.squeeze()
+                xyz = xyz[idx]
+                normal = normal[idx]
+                label = label[idx]
+                curvature = curvature[idx]
+
+
+        elif self.sample_type == None:
+            xyz = torch.from_numpy(xyz)
+            normal = torch.from_numpy(normal)
+            label = torch.from_numpy(label)
+            curvature = torch.from_numpy(curvature)
+            atom = torch.from_numpy(atom)
+            atom_type = torch.from_numpy(atom_type)
 
         if self.rot_aug:
             rot = self.gen_rot()
@@ -108,12 +154,6 @@ class Protein(Dataset):
             xyz = xyz - atom_center
             atom = atom - atom_center
 
-        xyz = torch.from_numpy(xyz)
-        normal = torch.from_numpy(normal)
-        label = torch.from_numpy(label)
-        curvature = torch.from_numpy(curvature)
-        atom = torch.from_numpy(atom)
-        atom_type = torch.from_numpy(atom_type)
 
         dists, idx, _ = knn_points(xyz.unsqueeze(0), atom.unsqueeze(0), K=self.K)
         dists = dists.squeeze(0)
@@ -125,21 +165,8 @@ class Protein(Dataset):
 
 
     def gen_rot(self):
-        anglex = np.random.uniform() * np.pi / self.factor
-        angley = np.random.uniform() * np.pi / self.factor
-        anglez = np.random.uniform() * np.pi / self.factor
-        cosx = np.cos(anglex)
-        cosy = np.cos(angley)
-        cosz = np.cos(anglez)
-        sinx = np.sin(anglex)
-        siny = np.sin(angley)
-        sinz = np.sin(anglez)
-        Rx = np.array([[1, 0, 0], [0, cosx, -sinx], [0, sinx, cosx]])
-        Ry = np.array([[cosy, 0, siny], [0, 1, 0], [-siny, 0, cosy]])
-        Rz = np.array([[cosz, -sinz, 0], [sinz, cosz, 0], [0, 0, 1]])
-        R_ab = Rx.dot(Ry).dot(Rz)
-
-        return R_ab.astype('float32')
+        R = torch.FloatTensor(Rotation.random().as_matrix())
+        return R
 
 
 
@@ -157,15 +184,15 @@ class ProteinPair(Dataset):
 
 
 if __name__ == "__main__":
-    dataset = Protein(phase = 'train')
+    dataset = Protein(phase = 'train', sample_type = 'uniform')
     dataloader = DataLoader(
         dataset,
         batch_size=4,
     )
 
-    for xyz, normal, label, curvature, dists, atom_type_sel in tqdm(dataset):
-        print(type(xyz))
-        break
+    # for xyz, normal, label, curvature, dists, atom_type_sel in tqdm(dataset):
+    #     print(type(xyz))
+    #     break
 
     for xyz, normal, label, curvature, dists, atom_type_sel in tqdm(dataloader):
         print(type(xyz))
