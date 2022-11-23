@@ -4,7 +4,7 @@ parser = argparse.ArgumentParser(description="Network parameters")
 
 # Main parameters
 parser.add_argument(
-    "--experiment_name", type=str, help="Name of experiment"
+    "--experiment_name", type=str, default='SSP', help="Name of experiment"
 )
 parser.add_argument(
     "--use_mesh", type=bool, default=False, help="Use precomputed surfaces"
@@ -12,7 +12,7 @@ parser.add_argument(
 parser.add_argument(
     "--embedding_layer",
     type=str,
-    default="dMaSIF",
+    default="DGCNN",
     choices=["dMaSIF", "DGCNN", "PointNet++"],
     help="Which convolutional embedding layer to use",
 )

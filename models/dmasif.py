@@ -11,7 +11,118 @@ from utils.geometry_processing import tangent_vectors
 import torch.nn.functional as F
 from math import pi, sqrt
 from utils.loss import site_loss
+from pytorch3d.ops.knn import knn_points
+from pytorch3d.ops.ball_query import ball_query
+from pytorch3d.ops.sample_farthest_points import sample_farthest_points
+from torch.nn import (
+    Sequential as Seq,
+    Dropout,
+    Linear as Lin,
+    LeakyReLU,
+    ReLU,
+    BatchNorm1d as BN,
+)
 
+
+
+def get_graph_feature(x, k):
+    _, idx, _ = knn_points(p1=x, p2=x, K=k)
+    feature = index_points(x, idx)
+
+    feature = torch.cat((feature - x.unsqueeze(-2), x.unsqueeze(-2).repeat(1,1,k,1)), dim=-1).contiguous()
+
+    return feature
+
+
+class DEConv(torch.nn.Module):
+    """Set abstraction module."""
+
+    def __init__(self, nn, k, aggr):
+        super(DEConv, self).__init__()
+        self.conv = nn
+        self.aggr = aggr
+        self.k = k
+
+    def forward(self, x):
+        x = get_graph_feature(x, k=self.k)
+        x = self.conv(x)
+        x = x.max(dim=-2, keepdim=False)[0]
+
+        return x
+
+
+class DGCNN_seg(torch.nn.Module):
+    def __init__(
+        self, in_channels, out_channels, n_layers, k=40, aggr="max"
+    ):
+        super(DGCNN_seg, self).__init__()
+
+        self.name = "DGCNN_seg"
+        self.I, self.O = (
+            in_channels + 3,
+            out_channels,
+        )  # Add coordinates to input channels
+        self.n_layers = n_layers
+
+        self.transform_1 = DEConv(MLP([2 * 3, 64, 128],batch_norm=False), k, aggr)
+        self.transform_2 = MLP([128, 1024],batch_norm=False)
+        self.transform_3 = MLP([1024, 512, 256], batch_norm=False)
+        self.transform_4 = Lin(256, 3 * 3)
+
+        self.conv_layers = nn.ModuleList(
+            [DEConv(MLP([2 * self.I, self.O, self.O], batch_norm=False), k, aggr)]
+            + [
+                DEConv(MLP([2 * self.O, self.O, self.O], batch_norm=False), k, aggr)
+                for i in range(n_layers - 1)
+            ]
+        )
+
+        self.linear_layers = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(self.O, self.O), nn.ReLU(), nn.Linear(self.O, self.O)
+                )
+                for i in range(n_layers)
+            ]
+        )
+
+        self.linear_transform = nn.ModuleList(
+            [nn.Linear(self.I, self.O)]
+            + [nn.Linear(self.O, self.O) for i in range(n_layers - 1)]
+        )
+        self.use_TNet = True
+
+    def forward(self, positions, features):
+        # Lab: (B,), Pos: (N, 3), Batch: (N,)
+        pos, feat = positions, features
+
+        # TransformNet:
+        x = pos  # Don't use the normals!
+
+        if self.use_TNet:
+            x = self.transform_1(x)  # (B, N, 3) -> (B, N, 128)
+            x = self.transform_2(x)  # (B, N, 128) -> (B, N, 1024)
+            x = x.max(dim = -2, keepdim=False)[0]  # (B, 1024)
+
+            x = self.transform_3(x)  # (B, 256)
+            x = self.transform_4(x)  # (B, 3*3)
+            x = x.view(-1, 3, 3)  # (B, 3, 3)
+
+            # Apply the transform:
+            x0 = torch.einsum("nki,nij->nkj", pos, x)  # (N, 3)
+        else:
+            x0 = x
+
+        # Add features to coordinates
+        x = torch.cat([x0, feat], dim=-1).contiguous()
+
+        for i in range(self.n_layers):
+            x_i = self.conv_layers[i](x)
+            x_i = self.linear_layers[i](x_i)
+            x = self.linear_transform[i](x)
+            x = x + x_i
+
+        return x
 
 
 def soft_dimension(features):
@@ -41,6 +152,131 @@ def soft_dimension(features):
         return -1
     return R.item()
 
+
+def MLP(channels, batch_norm=True):
+    """Multi-layer perceptron, with ReLU non-linearities and batch normalization."""
+    return Seq(
+        *[
+            Seq(
+                Lin(channels[i - 1], channels[i]),
+                BN(channels[i]) if batch_norm else nn.Identity(),
+                LeakyReLU(negative_slope=0.2),
+            )
+            for i in range(1, len(channels))
+        ]
+    )
+
+
+def index_points(points, idx):
+    """
+    Input:
+        points: input points data, [B, N, C]
+        idx: sample index data, [B, S]
+    Return:
+        new_points:, indexed points data, [B, S, C]
+    """
+    device = points.device
+    B = points.shape[0]
+    view_shape = list(idx.shape)
+    view_shape[1:] = [1] * (len(view_shape) - 1)
+    repeat_shape = list(idx.shape)
+    repeat_shape[0] = 1
+    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
+    new_points = points[batch_indices, idx, :]
+    return new_points
+
+
+def sample_and_group(npoint, radius, nsample, xyz, points):
+    B, N, C = xyz.shape
+    S = int(npoint * N)
+    if not S == N:
+        new_xyz, _ = sample_farthest_points(xyz, K = S)
+    else:
+        new_xyz = xyz
+
+    _, idx, _ = ball_query(p1 = new_xyz, p2 = xyz, K=nsample, radius=radius)
+    mask = idx != -1
+    grouped_xyz = index_points(xyz, idx)  # [B, npoint, nsample, C]
+    grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
+
+    if points is not None:
+        grouped_points = index_points(points, idx)
+        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1)  # [B, npoint, nsample, C+D]
+    else:
+        new_points = grouped_xyz_norm
+
+    return new_xyz, new_points, mask
+
+
+class SAModule(torch.nn.Module):
+    """Set abstraction module."""
+
+    def __init__(self, ratio, r, nn, max_num_neighbors=64):
+        super(SAModule, self).__init__()
+        self.ratio = ratio
+        self.r = r
+        self.conv = nn
+        self.max_num_neighbors = max_num_neighbors
+
+    def forward(self, x, pos):
+
+        xyz = pos
+        points = x
+
+        new_xyz, new_points, mask = sample_and_group(self.ratio, self.r, self.max_num_neighbors, xyz, points)
+
+        new_points = self.conv(new_points)
+
+        new_points = new_points * mask.unsqueeze(-1)
+
+        new_points = torch.max(new_points, 2)[0]
+
+        return new_points, new_xyz
+
+
+class PointNet2_seg(torch.nn.Module):
+    def __init__(self, args, in_channels, out_channels):
+        super(PointNet2_seg, self).__init__()
+
+        self.name = "PointNet2"
+        self.I, self.O = in_channels, out_channels
+        self.radius = args.radius
+        self.k = 512  # We don't restrict the number of points in a patch
+        self.n_layers = args.n_layers
+
+        # self.sa1_module = SAModule(1.0, self.radius, MLP([self.I+3, self.O, self.O]),self.k)
+        self.layers = nn.ModuleList(
+            [SAModule(1.0, self.radius, MLP([self.I + 3, self.O, self.O], batch_norm=False), self.k)]
+            + [
+                SAModule(1.0, self.radius, MLP([self.O + 3, self.O, self.O], batch_norm=False), self.k)
+                for i in range(self.n_layers - 1)
+            ]
+        )
+
+        self.linear_layers = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(self.O, self.O), nn.ReLU(), nn.Linear(self.O, self.O)
+                )
+                for i in range(self.n_layers)
+            ]
+        )
+
+        self.linear_transform = nn.ModuleList(
+            [nn.Linear(self.I, self.O)]
+            + [nn.Linear(self.O, self.O) for i in range(self.n_layers - 1)]
+        )
+
+    def forward(self, positions, features):
+        x = (features, positions)
+        for i, layer in enumerate(self.layers):
+            x_i, pos = layer(x[0], x[1])
+            x_i = self.linear_layers[i](x_i)
+            x = self.linear_transform[i](x[0])
+            x = x + x_i
+            x = (x, pos)
+
+        return x[0]
 
 
 class Atom_embedding_MP(nn.Module):
@@ -502,15 +738,12 @@ class dMaSIF(nn.Module):
                 radius=args.radius,
             )
 
-        # elif args.embedding_layer == "DGCNN":
-        #     self.conv = DGCNN_seg(I + 3, E, self.args.n_layers, self.args.k)
-        #     if args.search:
-        #         self.conv2 = DGCNN_seg(I + 3, E, self.args.n_layers, self.args.k)
-        #
-        # elif args.embedding_layer == "PointNet++":
-        #     self.conv = PointNet2_seg(args, I, E)
-        #     if args.search:
-        #         self.conv2 = PointNet2_seg(args, I, E)
+        elif args.embedding_layer == "DGCNN":
+            self.conv = DGCNN_seg(I + 3, E, self.args.n_layers, self.args.k)
+
+        elif args.embedding_layer == "PointNet++":
+            self.conv = PointNet2_seg(args, I, E)
+
 
         if args.site:
             # Post-processing, without batch norm:
@@ -536,7 +769,17 @@ class dMaSIF(nn.Module):
                 weights=self.orientation_scores(features)
             )
             embedding = self.conv(features)
-            pred = self.net_out(embedding)
+
+        elif self.args.embedding_layer == "DGCNN":
+            features = torch.cat([features, xyz], dim=-1).contiguous()
+            embedding = self.conv(xyz, features)
+
+
+        elif self.args.embedding_layer == "PointNet++":
+            embedding = self.conv(xyz, features)
+
+
+        pred = self.net_out(embedding)
 
         # R_values = {}
         # R_values["input"] = soft_dimension(features)
@@ -555,10 +798,10 @@ class dMaSIF(nn.Module):
 
 
 if __name__ == "__main__":
-    dataset = Protein(phase='train', sample_num = 2048)
+    dataset = Protein(phase='train', sample_num = 2048, sample_type = 'knn')
     dataloader = DataLoader(
         dataset,
-        batch_size=4,
+        batch_size=2,
     )
 
     args = parser.parse_args()
