@@ -142,9 +142,9 @@ if __name__ == "__main__":
     net = dMaSIF(args)
     net = net.to(args.device)
 
-    trainset = Protein(phase='train', rot_aug = True, sample_type = None)
-    valset = Protein(phase='val', rot_aug = False, sample_type = None)
-    testset = Protein(phase='test', rot_aug = False, sample_type = None)
+    trainset = Protein(phase='train', rot_aug = True, sample_type = 'knn', sample_num = 2048)
+    valset = Protein(phase='val', rot_aug = False, sample_type = 'knn', sample_num = 2048)
+    testset = Protein(phase='test', rot_aug = False, sample_type = 'knn', sample_num = 2048)
     train_loader = DataLoader(
         trainset,
         batch_size=args.batch_size,

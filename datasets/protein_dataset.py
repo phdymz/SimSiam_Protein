@@ -115,8 +115,10 @@ class Protein(Dataset):
                 atom = torch.from_numpy(atom)
                 atom_type = torch.from_numpy(atom_type)
             else:
-                idx_kpts = np.random.choice(len(xyz), 1)
-                kpts = torch.from_numpy(xyz[idx_kpts])
+                # idx_kpts = np.random.choice(len(xyz), 1)
+                # kpts = torch.from_numpy(xyz[idx_kpts])
+                kpts = torch.from_numpy(xyz[(label > 0).squeeze()][np.random.choice(int(label.sum()), 1)])
+
                 xyz = torch.from_numpy(xyz)
                 normal = torch.from_numpy(normal)
                 label = torch.from_numpy(label)
