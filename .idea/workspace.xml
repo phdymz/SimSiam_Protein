@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="1c51e716-781f-4b8c-90b6-e6296d3f5a35" name="变更" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/runs/dMaSIF_site_1layer_15A_knn2048/events.out.tfevents.1669637163.ymz-desktop.3677.0" beforeDir="false" afterPath="$PROJECT_DIR$/runs/dMaSIF_site_1layer_15A_knn2048/events.out.tfevents.1669637163.ymz-desktop.3677.0" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,7 +33,7 @@
   <component name="PropertiesComponent">
     <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../RGBD/RAL" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../lung/registration-da-mean-teacher" />
     <property name="settings.editor.selected.configurable" value="com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable" />
   </component>
   <component name="RunManager" selected="Python.train_site">
@@ -155,7 +155,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/train_site.py" />
-      <option name="PARAMETERS" value="--experiment_name PointNet_site_3layer_15A --batch_size 1 --embedding_layer PointNet++ --site True --single_protein True --device cuda:0 --random_rotation True --radius 15.0 --n_layers 3" />
+      <option name="PARAMETERS" value="--experiment_name dMaSIF_site_1layer_15A_knn2048 --batch_size 1 --embedding_layer dMaSIF --site True --single_protein True --random_rotation True --radius 15.0 --n_layers 1" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
       <option name="MODULE_MODE" value="false" />
