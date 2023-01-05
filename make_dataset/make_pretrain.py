@@ -29,7 +29,7 @@ from make_dataset.geometry_processing import (
 
 
 
-
+begin = 104420
 
 
 
@@ -73,7 +73,9 @@ if __name__ == "__main__":
     files.sort()
     print("Preprocessing training dataset")
 
-    for item in tqdm(files):
+    for i, item in enumerate(tqdm(files)):
+        if i < begin:
+            continue
         try:
             pdb_root = os.path.join(source_root, item)
             data = np.load(pdb_root)
@@ -87,6 +89,9 @@ if __name__ == "__main__":
                 type[:, 3][:, None],
                 type[:, 4][:, None],
             ], axis=-1)
+
+            if len(atom) > 20000:
+                continue
 
             if type.sum() != atom_type.sum():
                 continue
